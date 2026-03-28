@@ -7,6 +7,8 @@
 #include "pages/PuertosPage.h"
 #include "pages/DispositivosPage.h"
 #include "pages/TiposPage.h"
+#include "pages/HistorialPage.h"
+#include "core/HistorialService.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QStackedWidget>
@@ -47,7 +49,9 @@ DashboardWidget::DashboardWidget(const Usuario& user, SupabaseClient* supabase, 
     : QWidget(parent)
     , m_user(user)
     , m_supabase(supabase)
+    , m_historial(new HistorialService(supabase, this))
 {
+    m_historial->setUsuario(m_user);
     auto* mainLayout = new QHBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
@@ -101,6 +105,7 @@ void DashboardWidget::setupSidebar(QVBoxLayout* layout)
     addNavButton(layout, tr("Dispositivos"),  idx++);
     addNavButton(layout, tr("Tipos"), idx++);
     addNavButton(layout, tr("Puertos"), idx++);
+    addNavButton(layout, tr("Historial"), idx++);
 
     layout->addStretch(1);
 
@@ -128,15 +133,16 @@ QPushButton* DashboardWidget::addNavButton(QVBoxLayout* layout, const QString& t
 
 void DashboardWidget::setupPages()
 {
-    m_stack->addWidget(new PiezasPage(m_supabase, this));
+    m_stack->addWidget(new PiezasPage(m_supabase, m_historial, this));
     m_stack->addWidget(new TimelinesPage(this));
-    m_stack->addWidget(new PropietariosPage(m_supabase, this));
-    m_stack->addWidget(new UbicacionesPage(m_supabase, this));
+    m_stack->addWidget(new PropietariosPage(m_supabase, m_historial, this));
+    m_stack->addWidget(new UbicacionesPage(m_supabase, m_historial, this));
     m_stack->addWidget(new DispositivosPage(this));
 
     const bool tiposPuertosViewOnly = (m_user.permiso != QStringLiteral("admin"));
-    m_stack->addWidget(new TiposPage(m_supabase, tiposPuertosViewOnly, this));
-    m_stack->addWidget(new PuertosPage(m_supabase, tiposPuertosViewOnly, this));
+    m_stack->addWidget(new TiposPage(m_supabase, m_historial, tiposPuertosViewOnly, this));
+    m_stack->addWidget(new PuertosPage(m_supabase, m_historial, tiposPuertosViewOnly, this));
+    m_stack->addWidget(new HistorialPage(m_historial, this));
 }
 
 void DashboardWidget::onNavButtonClicked(int index)

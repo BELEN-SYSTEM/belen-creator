@@ -14,10 +14,11 @@
 #include <QLineEdit>
 #include <QDialogButtonBox>
 
-UbicacionesPage::UbicacionesPage(SupabaseClient* supabase, QWidget* parent)
+UbicacionesPage::UbicacionesPage(SupabaseClient* supabase, HistorialService* historial,
+                                 QWidget* parent)
     : QWidget(parent)
     , m_supabase(supabase)
-    , m_service(new UbicacionService(supabase, this))
+    , m_service(new UbicacionService(supabase, historial, this))
 {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(24, 24, 24, 24);
@@ -76,7 +77,8 @@ UbicacionesPage::UbicacionesPage(SupabaseClient* supabase, QWidget* parent)
         "QTableWidget { gridline-color: #e8e8e8; outline: none; }"
         "QTableWidget::item { padding: 12px 16px; color: #1a1a1a; border: none; outline: none; }"
         "QTableWidget::item:hover { background-color: #f0f0f0; border: none; outline: none; }"
-        "QTableWidget::item:selected { background-color: #c5d9e8; color: #1a1a1a; border: none; outline: none; }"
+        "QTableWidget::item:selected { background-color: #e4e4e4; color: #1a1a1a; border: none; outline: none; }"
+        "QTableWidget::item:selected:active { background-color: #dcdcdc; border: none; outline: none; }"
         "QTableWidget::item:focus { border: none; outline: none; }"
         "QHeaderView::section { padding: 12px 16px; background-color: #ecf0f1; color: #2c3e50; }"));
     m_table->setFocusPolicy(Qt::NoFocus);

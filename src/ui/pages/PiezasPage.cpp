@@ -1,4 +1,5 @@
 #include "PiezasPage.h"
+#include "core/TipoService.h"
 #include "core/SupabaseClient.h"
 #include "core/PiezaService.h"
 #include "core/PropietarioService.h"
@@ -37,6 +38,205 @@
 #include <QScreen>
 #include <QCursor>
 #include <QSignalBlocker>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QJsonValue>
+#include <QVariant>
+#include <QSpinBox>
+#include <QListWidgetItem>
+#include <QHash>
+#include <QMap>
+#include <QSet>
+#include <memory>
+
+namespace {
+
+static QJsonObject parseTipoVarDefs(const QString& paramsJson)
+{
+    if (paramsJson.isEmpty() || paramsJson == QLatin1String("{}")) return {};
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(paramsJson.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return {};
+    return doc.object();
+}
+
+static QString varTipoFromDef(const QJsonValue& defVal)
+{
+    if (defVal.isObject()) {
+        QString t = defVal.toObject().value(QStringLiteral("tipo")).toString();
+        if (!t.isEmpty()) return t;
+    }
+    return QStringLiteral("texto");
+}
+
+static void clearVBoxLayout(QLayout* lay)
+{
+    while (QLayoutItem* it = lay->takeAt(0)) {
+        if (QWidget* w = it->widget())
+            w->deleteLater();
+        delete it;
+    }
+}
+
+static QWidget* makeParamValueEditor(const QString& varTipo, const QJsonValue& initial, QWidget* parent)
+{
+    QString t = varTipo.isEmpty() ? QStringLiteral("texto") : varTipo;
+    if (t == QLatin1String("entero")) {
+        auto* s = new QSpinBox(parent);
+        s->setRange(-2000000000, 2000000000);
+        s->setProperty("paramKind", QVariant(QStringLiteral("entero")));
+        if (initial.isDouble())
+            s->setValue(static_cast<int>(initial.toDouble()));
+        else if (initial.isString())
+            s->setValue(initial.toString().toInt());
+        return s;
+    }
+    if (t == QLatin1String("decimal")) {
+        auto* d = new QDoubleSpinBox(parent);
+        d->setRange(-1e9, 1e9);
+        d->setDecimals(6);
+        d->setProperty("paramKind", QVariant(QStringLiteral("decimal")));
+        if (initial.isDouble())
+            d->setValue(initial.toDouble());
+        else if (initial.isString())
+            d->setValue(initial.toString().toDouble());
+        return d;
+    }
+    if (t == QLatin1String("booleano")) {
+        auto* c = new QCheckBox(parent);
+        c->setProperty("paramKind", QVariant(QStringLiteral("booleano")));
+        if (initial.isBool())
+            c->setChecked(initial.toBool());
+        else if (initial.isDouble())
+            c->setChecked(initial.toInt() != 0);
+        else if (initial.isString()) {
+            QString u = initial.toString().toLower();
+            c->setChecked(u == QLatin1String("1") || u == QLatin1String("true") || u == QLatin1String("si"));
+        }
+        return c;
+    }
+    auto* e = new QLineEdit(parent);
+    e->setProperty("paramKind", QVariant(QStringLiteral("texto")));
+    if (initial.isString())
+        e->setText(initial.toString());
+    else if (initial.isDouble())
+        e->setText(QString::number(initial.toDouble()));
+    else if (initial.isBool())
+        e->setText(initial.toBool() ? QStringLiteral("true") : QStringLiteral("false"));
+    return e;
+}
+
+static QJsonValue widgetValueToJson(QWidget* w)
+{
+    QString kind = w->property("paramKind").toString();
+    if (kind == QLatin1String("entero")) {
+        if (auto* s = qobject_cast<QSpinBox*>(w))
+            return s->value();
+    } else if (kind == QLatin1String("decimal")) {
+        if (auto* d = qobject_cast<QDoubleSpinBox*>(w))
+            return d->value();
+    } else if (kind == QLatin1String("booleano")) {
+        if (auto* c = qobject_cast<QCheckBox*>(w))
+            return c->isChecked();
+    } else if (auto* e = qobject_cast<QLineEdit*>(w)) {
+        return e->text();
+    }
+    return QJsonValue();
+}
+
+static QJsonObject gatherPiezaParamValues(const QHash<int, QMap<QString, QWidget*>>& map)
+{
+    QJsonObject root;
+    for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+        QJsonObject sub;
+        for (auto pit = it.value().constBegin(); pit != it.value().constEnd(); ++pit)
+            sub.insert(pit.key(), widgetValueToJson(pit.value()));
+        if (!sub.isEmpty())
+            root.insert(QString::number(it.key()), sub);
+    }
+    return root;
+}
+
+static void pruneWorkingToChecked(QJsonObject* working, const QVector<int>& checkedIds)
+{
+    QSet<QString> ok;
+    for (int id : checkedIds)
+        ok.insert(QString::number(id));
+    QJsonObject out;
+    for (auto wit = working->begin(); wit != working->end(); ++wit) {
+        if (ok.contains(wit.key()))
+            out.insert(wit.key(), wit.value());
+    }
+    *working = out;
+}
+
+static void rebuildPiezaTipoParamsPanel(QWidget* trContext,
+                                        QVBoxLayout* innerLay,
+                                        const QVector<int>& checkedTipoIds,
+                                        const QVector<Tipo>& tipos,
+                                        const QJsonObject& workingParams,
+                                        QHash<int, QMap<QString, QWidget*>>* outMap)
+{
+    clearVBoxLayout(innerLay);
+    outMap->clear();
+    for (int tipoId : checkedTipoIds) {
+        const Tipo* tp = nullptr;
+        for (const Tipo& t : tipos) {
+            if (t.id == tipoId) {
+                tp = &t;
+                break;
+            }
+        }
+        if (!tp) continue;
+        QJsonObject varDefs = parseTipoVarDefs(tp->params);
+        if (varDefs.isEmpty()) continue;
+        auto* gb = new QGroupBox(tp->nombre.isEmpty() ? QStringLiteral("Tipo %1").arg(tipoId) : tp->nombre);
+        auto* fl = new QFormLayout(gb);
+        QJsonObject exist = workingParams.value(QString::number(tipoId)).toObject();
+        QMap<QString, QWidget*> rowW;
+        for (auto dit = varDefs.begin(); dit != varDefs.end(); ++dit) {
+            QString varName = dit.key();
+            QString vtipo = varTipoFromDef(dit.value());
+            QWidget* ed = makeParamValueEditor(vtipo, exist.value(varName), gb);
+            fl->addRow(varName + QLatin1Char(':'), ed);
+            rowW.insert(varName, ed);
+        }
+        innerLay->addWidget(gb);
+        (*outMap)[tipoId] = rowW;
+    }
+    if (innerLay->count() == 0 && trContext) {
+        auto* hint = new QLabel(trContext->tr(
+            "Marca tipos que definan variables (en Tipos) para rellenar sus valores aqu\u00ed."));
+        hint->setWordWrap(true);
+        hint->setStyleSheet(QStringLiteral("color: #7f8c8d; font-size: 11px;"));
+        innerLay->addWidget(hint);
+    }
+}
+
+static QVector<int> checkedTipoIdsFromList(QListWidget* tiposList)
+{
+    QVector<int> ids;
+    for (int i = 0; i < tiposList->count(); ++i) {
+        if (tiposList->item(i)->checkState() == Qt::Checked)
+            ids.append(tiposList->item(i)->data(Qt::UserRole).toInt());
+    }
+    return ids;
+}
+
+static QJsonObject workingParamsFromPieza(const Pieza& p)
+{
+    QJsonParseError err;
+    QJsonDocument d = QJsonDocument::fromJson(p.paramsJson.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !d.isObject()) return {};
+    return d.object();
+}
+
+static QString piezaParamsToJsonString(const QJsonObject& o)
+{
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+} // namespace
 
 static const int CARD_WIDTH = 230;
 static const int CARD_HEIGHT = 300;
@@ -55,13 +255,13 @@ static QPixmap pixmapFromBase64(const QString& base64, int maxW, int maxH)
     return p.scaled(maxW, maxH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
-PiezasPage::PiezasPage(SupabaseClient* supabase, QWidget* parent)
+PiezasPage::PiezasPage(SupabaseClient* supabase, HistorialService* historial, QWidget* parent)
     : QWidget(parent)
     , m_supabase(supabase)
-    , m_piezaService(new PiezaService(supabase, this))
-    , m_propService(new PropietarioService(supabase, this))
-    , m_ubicService(new UbicacionService(supabase, this))
-    , m_tipoService(new TipoService(supabase, this))
+    , m_piezaService(new PiezaService(supabase, historial, this))
+    , m_propService(new PropietarioService(supabase, historial, this))
+    , m_ubicService(new UbicacionService(supabase, historial, this))
+    , m_tipoService(new TipoService(supabase, historial, this))
     , m_overlay(new LoadingOverlay(this))
 {
     auto* layout = new QVBoxLayout(this);
@@ -245,6 +445,26 @@ PiezasPage::PiezasPage(SupabaseClient* supabase, QWidget* parent)
         m_tipoService->fetchAll();
         QTimer::singleShot(0, this, &PiezasPage::refreshCards);
     }
+}
+
+void PiezasPage::withTiposRefreshed(std::function<void()> body)
+{
+    if (!m_tipoService) {
+        if (body)
+            body();
+        return;
+    }
+    auto ran = std::make_shared<bool>(false);
+    auto once = [ran, body]() {
+        if (*ran)
+            return;
+        *ran = true;
+        if (body)
+            body();
+    };
+    connect(m_tipoService, &TipoService::dataReady, this, once, Qt::SingleShotConnection);
+    connect(m_tipoService, &TipoService::errorOccurred, this, once, Qt::SingleShotConnection);
+    m_tipoService->fetchAll();
 }
 
 PiezaListParams PiezasPage::currentParams() const
@@ -540,22 +760,76 @@ void PiezasPage::onAdd()
         return;
     }
 
+    withTiposRefreshed([this]() {
     QDialog dlg(this);
     dlg.setWindowTitle(tr("A\u00f1adir pieza"));
-    dlg.setMinimumWidth(480);
-    auto* form = new QFormLayout(&dlg);
+    dlg.setMinimumSize(780, 520);
+
+    auto* mainLay = new QVBoxLayout(&dlg);
+    auto* hRow = new QHBoxLayout();
+
+    auto* leftCol = new QWidget(&dlg);
+    leftCol->setMinimumWidth(280);
+    auto* leftLay = new QVBoxLayout(leftCol);
+    leftLay->setContentsMargins(0, 0, 10, 0);
+
+    auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
+    auto* tiposLayout = new QVBoxLayout(tiposGroup);
+    auto* tiposList = new QListWidget(&dlg);
+    tiposList->setMinimumHeight(0);
+    tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    tiposList->setStyleSheet(QStringLiteral(
+        "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
+        "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
+    for (const auto& t : m_lastTipos) {
+        auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
+        item->setData(Qt::UserRole, t.id);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Unchecked);
+        tiposList->addItem(item);
+    }
+    tiposLayout->addWidget(tiposList, 1);
+    leftLay->addWidget(tiposGroup, 1);
+
+    auto* paramsGroup = new QGroupBox(tr("Par\u00e1metros por tipo"), &dlg);
+    auto* paramsGroupLay = new QVBoxLayout(paramsGroup);
+    auto* paramsInner = new QWidget(paramsGroup);
+    auto* paramsInnerLay = new QVBoxLayout(paramsInner);
+    paramsInnerLay->setContentsMargins(4, 4, 4, 4);
+    paramsGroupLay->addWidget(paramsInner);
+    leftLay->addWidget(paramsGroup, 0);
+
+    QJsonObject workingParams;
+    QHash<int, QMap<QString, QWidget*>> paramWidgets;
+    auto refreshParamPanel = [paramsInnerLay, tiposList, this, &workingParams, &paramWidgets]() {
+        QJsonObject g = gatherPiezaParamValues(paramWidgets);
+        for (auto it = g.begin(); it != g.end(); ++it)
+            workingParams.insert(it.key(), it.value());
+        QVector<int> ids = checkedTipoIdsFromList(tiposList);
+        pruneWorkingToChecked(&workingParams, ids);
+        rebuildPiezaTipoParamsPanel(this, paramsInnerLay, ids, m_lastTipos, workingParams, &paramWidgets);
+    };
+    QObject::connect(tiposList, &QListWidget::itemChanged, &dlg,
+        [refreshParamPanel](QListWidgetItem*) { refreshParamPanel(); });
+    refreshParamPanel();
+
+    hRow->addWidget(leftCol, 0);
+
+    auto* rightCol = new QWidget(&dlg);
+    auto* rightOuter = new QVBoxLayout(rightCol);
+    auto* rightForm = new QFormLayout();
 
     auto* codigoEdit = new QLineEdit(&dlg);
     codigoEdit->setPlaceholderText(tr("C\u00f3digo opcional"));
-    form->addRow(tr("C\u00f3digo:"), codigoEdit);
+    rightForm->addRow(tr("C\u00f3digo:"), codigoEdit);
 
     auto* nombreEdit = new QLineEdit(&dlg);
     nombreEdit->setPlaceholderText(tr("Nombre de la pieza"));
-    form->addRow(tr("Nombre:"), nombreEdit);
+    rightForm->addRow(tr("Nombre:"), nombreEdit);
 
     auto* notasEdit = new QLineEdit(&dlg);
     notasEdit->setPlaceholderText(tr("Notas opcionales"));
-    form->addRow(tr("Notas:"), notasEdit);
+    rightForm->addRow(tr("Notas:"), notasEdit);
 
     auto* fechaCheck = new QCheckBox(tr("Usar fecha"), &dlg);
     fechaCheck->setChecked(false);
@@ -570,7 +844,7 @@ void PiezasPage::onAdd()
     auto* fechaRow = new QHBoxLayout();
     fechaRow->addWidget(fechaCheck);
     fechaRow->addWidget(fechaEdit);
-    form->addRow(tr("Fecha:"), fechaRow);
+    rightForm->addRow(tr("Fecha:"), fechaRow);
 
     QObject::connect(fechaCheck, &QCheckBox::toggled, &dlg, [fechaEdit](bool on) {
         fechaEdit->setEnabled(on);
@@ -580,40 +854,24 @@ void PiezasPage::onAdd()
     precioSpin->setRange(0, 999999.99);
     precioSpin->setDecimals(2);
     precioSpin->setValue(0);
-    form->addRow(tr("Precio:"), precioSpin);
+    rightForm->addRow(tr("Precio:"), precioSpin);
 
     auto* propCombo = new QComboBox(&dlg);
     for (const auto& p : m_lastPropietarios)
         propCombo->addItem(p.nombre, p.id);
-    form->addRow(tr("Propietario:"), propCombo);
+    rightForm->addRow(tr("Propietario:"), propCombo);
 
     auto* ubiCombo = new QComboBox(&dlg);
     ubiCombo->addItem(tr("Sin ubicaci\u00f3n"), 0);
     for (const auto& u : m_lastUbicaciones)
         ubiCombo->addItem(u.nombre, u.id);
-    form->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
+    rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
-    auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
-    auto* tiposLayout = new QVBoxLayout(tiposGroup);
-    QListWidget* tiposList = new QListWidget(&dlg);
-    tiposList->setMinimumHeight(160);
-    tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    tiposList->setStyleSheet(QStringLiteral(
-        "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
-        "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
-    for (const auto& t : m_lastTipos) {
-        auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
-        item->setData(Qt::UserRole, t.id);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(Qt::Unchecked);
-        tiposList->addItem(item);
-    }
-    tiposLayout->addWidget(tiposList);
-    form->addRow(tiposGroup);
+    rightOuter->addLayout(rightForm);
 
     auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
     auto* imgsLayout = new QVBoxLayout(imgsGroup);
-    QListWidget* imgsList = new QListWidget(&dlg);
+    auto* imgsList = new QListWidget(&dlg);
     imgsList->setMinimumHeight(120);
     imgsList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     imgsList->setDragDropMode(QAbstractItemView::InternalMove);
@@ -626,7 +884,10 @@ void PiezasPage::onAdd()
     imgsBtnRow->addWidget(removeImgBtn);
     imgsBtnRow->addStretch(1);
     imgsLayout->addLayout(imgsBtnRow);
-    form->addRow(imgsGroup);
+    rightOuter->addWidget(imgsGroup, 1);
+
+    hRow->addWidget(rightCol, 1);
+    mainLay->addLayout(hRow, 1);
 
     connect(addImgBtn, &QPushButton::clicked, &dlg, [&dlg, imgsList]() {
         QString path = QFileDialog::getOpenFileName(&dlg, tr("Seleccionar imagen"), QString(),
@@ -650,7 +911,7 @@ void PiezasPage::onAdd()
     });
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-    form->addRow(buttons);
+    mainLay->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, [nombreEdit, &dlg]() {
         if (nombreEdit->text().trimmed().isEmpty()) {
             QMessageBox::warning(&dlg, tr("Piezas"), tr("El nombre no puede estar vac\u00edo."));
@@ -668,11 +929,11 @@ void PiezasPage::onAdd()
     QString nombre = nombreEdit->text().trimmed();
     int propietarioId = propCombo->currentData().toInt();
     int ubicacionId = ubiCombo->currentData().toInt();
-    QVector<int> tipoIds;
-    for (int i = 0; i < tiposList->count(); ++i) {
-        if (tiposList->item(i)->checkState() == Qt::Checked)
-            tipoIds.append(tiposList->item(i)->data(Qt::UserRole).toInt());
-    }
+    QVector<int> tipoIds = checkedTipoIdsFromList(tiposList);
+    QJsonObject g = gatherPiezaParamValues(paramWidgets);
+    for (auto it = g.begin(); it != g.end(); ++it)
+        workingParams.insert(it.key(), it.value());
+    pruneWorkingToChecked(&workingParams, tipoIds);
     m_overlay->showOverlay();
     m_piezaService->create(
         codigoEdit->text().trimmed(),
@@ -683,7 +944,9 @@ void PiezasPage::onAdd()
         propietarioId,
         ubicacionId,
         tipoIds,
-        imagenesBase64);
+        imagenesBase64,
+        piezaParamsToJsonString(workingParams));
+    });
 }
 
 void PiezasPage::onEdit(int piezaId)
@@ -701,25 +964,79 @@ void PiezasPage::onEdit(int piezaId)
             return;
         }
 
+        withTiposRefreshed([this, piezaId, card]() {
         QDialog dlg(this);
         dlg.setWindowTitle(tr("Editar pieza"));
-        dlg.setMinimumWidth(480);
-        auto* form = new QFormLayout(&dlg);
+        dlg.setMinimumSize(780, 520);
+
+        auto* mainLay = new QVBoxLayout(&dlg);
+        auto* hRow = new QHBoxLayout();
+
+        auto* leftCol = new QWidget(&dlg);
+        leftCol->setMinimumWidth(280);
+        auto* leftLay = new QVBoxLayout(leftCol);
+        leftLay->setContentsMargins(0, 0, 10, 0);
+
+        auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
+        auto* tiposLayout = new QVBoxLayout(tiposGroup);
+        auto* tiposList = new QListWidget(&dlg);
+        tiposList->setMinimumHeight(0);
+        tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        tiposList->setStyleSheet(QStringLiteral(
+            "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
+            "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
+        for (const auto& t : m_lastTipos) {
+            auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
+            item->setData(Qt::UserRole, t.id);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(card.tipoIds.contains(t.id) ? Qt::Checked : Qt::Unchecked);
+            tiposList->addItem(item);
+        }
+        tiposLayout->addWidget(tiposList, 1);
+        leftLay->addWidget(tiposGroup, 1);
+
+        auto* paramsGroup = new QGroupBox(tr("Par\u00e1metros por tipo"), &dlg);
+        auto* paramsGroupLay = new QVBoxLayout(paramsGroup);
+        auto* paramsInner = new QWidget(paramsGroup);
+        auto* paramsInnerLay = new QVBoxLayout(paramsInner);
+        paramsInnerLay->setContentsMargins(4, 4, 4, 4);
+        paramsGroupLay->addWidget(paramsInner);
+        leftLay->addWidget(paramsGroup, 0);
+
+        QJsonObject workingParams = workingParamsFromPieza(card.pieza);
+        QHash<int, QMap<QString, QWidget*>> paramWidgets;
+        auto refreshParamPanel = [paramsInnerLay, tiposList, this, &workingParams, &paramWidgets]() {
+            QJsonObject g = gatherPiezaParamValues(paramWidgets);
+            for (auto it = g.begin(); it != g.end(); ++it)
+                workingParams.insert(it.key(), it.value());
+            QVector<int> ids = checkedTipoIdsFromList(tiposList);
+            pruneWorkingToChecked(&workingParams, ids);
+            rebuildPiezaTipoParamsPanel(this, paramsInnerLay, ids, m_lastTipos, workingParams, &paramWidgets);
+        };
+        QObject::connect(tiposList, &QListWidget::itemChanged, &dlg,
+            [refreshParamPanel](QListWidgetItem*) { refreshParamPanel(); });
+        refreshParamPanel();
+
+        hRow->addWidget(leftCol, 0);
+
+        auto* rightCol = new QWidget(&dlg);
+        auto* rightOuter = new QVBoxLayout(rightCol);
+        auto* rightForm = new QFormLayout();
 
         auto* codigoEdit = new QLineEdit(&dlg);
         codigoEdit->setPlaceholderText(tr("C\u00f3digo opcional"));
         codigoEdit->setText(card.pieza.codigo);
-        form->addRow(tr("C\u00f3digo:"), codigoEdit);
+        rightForm->addRow(tr("C\u00f3digo:"), codigoEdit);
 
         auto* nombreEdit = new QLineEdit(&dlg);
         nombreEdit->setPlaceholderText(tr("Nombre de la pieza"));
         nombreEdit->setText(card.pieza.nombre);
-        form->addRow(tr("Nombre:"), nombreEdit);
+        rightForm->addRow(tr("Nombre:"), nombreEdit);
 
         auto* notasEdit = new QLineEdit(&dlg);
         notasEdit->setPlaceholderText(tr("Notas opcionales"));
         notasEdit->setText(card.pieza.notas);
-        form->addRow(tr("Notas:"), notasEdit);
+        rightForm->addRow(tr("Notas:"), notasEdit);
 
         auto* fechaCheck = new QCheckBox(tr("Usar fecha"), &dlg);
         fechaCheck->setChecked(card.pieza.fecha.isValid());
@@ -734,7 +1051,7 @@ void PiezasPage::onEdit(int piezaId)
         auto* fechaRow = new QHBoxLayout();
         fechaRow->addWidget(fechaCheck);
         fechaRow->addWidget(fechaEdit);
-        form->addRow(tr("Fecha:"), fechaRow);
+        rightForm->addRow(tr("Fecha:"), fechaRow);
 
         QObject::connect(fechaCheck, &QCheckBox::toggled, &dlg, [fechaEdit](bool on) {
             fechaEdit->setEnabled(on);
@@ -744,14 +1061,14 @@ void PiezasPage::onEdit(int piezaId)
         precioSpin->setRange(0, 999999.99);
         precioSpin->setDecimals(2);
         precioSpin->setValue(card.pieza.precio);
-        form->addRow(tr("Precio:"), precioSpin);
+        rightForm->addRow(tr("Precio:"), precioSpin);
 
         auto* propCombo = new QComboBox(&dlg);
         for (const auto& p : m_lastPropietarios)
             propCombo->addItem(p.nombre, p.id);
         int propIdx = propCombo->findData(card.pieza.propietarioId);
         if (propIdx >= 0) propCombo->setCurrentIndex(propIdx);
-        form->addRow(tr("Propietario:"), propCombo);
+        rightForm->addRow(tr("Propietario:"), propCombo);
 
         auto* ubiCombo = new QComboBox(&dlg);
         ubiCombo->addItem(tr("Sin ubicaci\u00f3n"), 0);
@@ -759,29 +1076,13 @@ void PiezasPage::onEdit(int piezaId)
             ubiCombo->addItem(u.nombre, u.id);
         int ubiIdx = ubiCombo->findData(card.pieza.ubicacionId);
         if (ubiIdx >= 0) ubiCombo->setCurrentIndex(ubiIdx);
-        form->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
+        rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
-        auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
-        auto* tiposLayout = new QVBoxLayout(tiposGroup);
-        QListWidget* tiposList = new QListWidget(&dlg);
-        tiposList->setMinimumHeight(160);
-        tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        tiposList->setStyleSheet(QStringLiteral(
-            "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
-            "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
-        for (const auto& t : m_lastTipos) {
-            auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
-            item->setData(Qt::UserRole, t.id);
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-            item->setCheckState(card.tipoIds.contains(t.id) ? Qt::Checked : Qt::Unchecked);
-            tiposList->addItem(item);
-        }
-        tiposLayout->addWidget(tiposList);
-        form->addRow(tiposGroup);
+        rightOuter->addLayout(rightForm);
 
         auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
         auto* imgsLayout = new QVBoxLayout(imgsGroup);
-        QListWidget* imgsList = new QListWidget(&dlg);
+        auto* imgsList = new QListWidget(&dlg);
         imgsList->setMinimumHeight(120);
         imgsList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         imgsList->setDragDropMode(QAbstractItemView::InternalMove);
@@ -799,7 +1100,10 @@ void PiezasPage::onEdit(int piezaId)
         imgsBtnRow->addWidget(removeImgBtn);
         imgsBtnRow->addStretch(1);
         imgsLayout->addLayout(imgsBtnRow);
-        form->addRow(imgsGroup);
+        rightOuter->addWidget(imgsGroup, 1);
+
+        hRow->addWidget(rightCol, 1);
+        mainLay->addLayout(hRow, 1);
 
         connect(addImgBtn, &QPushButton::clicked, &dlg, [&dlg, imgsList]() {
             QString path = QFileDialog::getOpenFileName(&dlg, tr("Seleccionar imagen"), QString(),
@@ -823,7 +1127,7 @@ void PiezasPage::onEdit(int piezaId)
         });
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-        form->addRow(buttons);
+        mainLay->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, [nombreEdit, &dlg]() {
             if (nombreEdit->text().trimmed().isEmpty()) {
                 QMessageBox::warning(&dlg, tr("Piezas"), tr("El nombre no puede estar vac\u00edo."));
@@ -841,14 +1145,16 @@ void PiezasPage::onEdit(int piezaId)
         QString nombre = nombreEdit->text().trimmed();
         int propietarioId = propCombo->currentData().toInt();
         int ubicacionId = ubiCombo->currentData().toInt();
-        QVector<int> tipoIds;
-        for (int i = 0; i < tiposList->count(); ++i) {
-            if (tiposList->item(i)->checkState() == Qt::Checked)
-                tipoIds.append(tiposList->item(i)->data(Qt::UserRole).toInt());
-        }
+        QVector<int> tipoIds = checkedTipoIdsFromList(tiposList);
+        QJsonObject g = gatherPiezaParamValues(paramWidgets);
+        for (auto it = g.begin(); it != g.end(); ++it)
+            workingParams.insert(it.key(), it.value());
+        pruneWorkingToChecked(&workingParams, tipoIds);
         m_overlay->showOverlay();
         m_piezaService->update(piezaId, codigoEdit->text().trimmed(), nombre, notasEdit->text().trimmed(),
-            fechaCheck->isChecked() ? fechaEdit->date() : QDate(), precioSpin->value(), propietarioId, ubicacionId, tipoIds, imagenesBase64);
+            fechaCheck->isChecked() ? fechaEdit->date() : QDate(), precioSpin->value(), propietarioId, ubicacionId,
+            tipoIds, imagenesBase64, piezaParamsToJsonString(workingParams));
+        });
     }, Qt::SingleShotConnection);
     m_piezaService->fetchPiezaForEdit(piezaId);
 }
@@ -868,25 +1174,79 @@ void PiezasPage::onDuplicate(int piezaId)
             return;
         }
 
+        withTiposRefreshed([this, card]() {
         QDialog dlg(this);
         dlg.setWindowTitle(tr("Duplicar pieza"));
-        dlg.setMinimumWidth(480);
-        auto* form = new QFormLayout(&dlg);
+        dlg.setMinimumSize(780, 520);
+
+        auto* mainLay = new QVBoxLayout(&dlg);
+        auto* hRow = new QHBoxLayout();
+
+        auto* leftCol = new QWidget(&dlg);
+        leftCol->setMinimumWidth(280);
+        auto* leftLay = new QVBoxLayout(leftCol);
+        leftLay->setContentsMargins(0, 0, 10, 0);
+
+        auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
+        auto* tiposLayout = new QVBoxLayout(tiposGroup);
+        auto* tiposList = new QListWidget(&dlg);
+        tiposList->setMinimumHeight(0);
+        tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        tiposList->setStyleSheet(QStringLiteral(
+            "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
+            "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
+        for (const auto& t : m_lastTipos) {
+            auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
+            item->setData(Qt::UserRole, t.id);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(card.tipoIds.contains(t.id) ? Qt::Checked : Qt::Unchecked);
+            tiposList->addItem(item);
+        }
+        tiposLayout->addWidget(tiposList, 1);
+        leftLay->addWidget(tiposGroup, 1);
+
+        auto* paramsGroup = new QGroupBox(tr("Par\u00e1metros por tipo"), &dlg);
+        auto* paramsGroupLay = new QVBoxLayout(paramsGroup);
+        auto* paramsInner = new QWidget(paramsGroup);
+        auto* paramsInnerLay = new QVBoxLayout(paramsInner);
+        paramsInnerLay->setContentsMargins(4, 4, 4, 4);
+        paramsGroupLay->addWidget(paramsInner);
+        leftLay->addWidget(paramsGroup, 0);
+
+        QJsonObject workingParams = workingParamsFromPieza(card.pieza);
+        QHash<int, QMap<QString, QWidget*>> paramWidgets;
+        auto refreshParamPanel = [paramsInnerLay, tiposList, this, &workingParams, &paramWidgets]() {
+            QJsonObject g = gatherPiezaParamValues(paramWidgets);
+            for (auto it = g.begin(); it != g.end(); ++it)
+                workingParams.insert(it.key(), it.value());
+            QVector<int> ids = checkedTipoIdsFromList(tiposList);
+            pruneWorkingToChecked(&workingParams, ids);
+            rebuildPiezaTipoParamsPanel(this, paramsInnerLay, ids, m_lastTipos, workingParams, &paramWidgets);
+        };
+        QObject::connect(tiposList, &QListWidget::itemChanged, &dlg,
+            [refreshParamPanel](QListWidgetItem*) { refreshParamPanel(); });
+        refreshParamPanel();
+
+        hRow->addWidget(leftCol, 0);
+
+        auto* rightCol = new QWidget(&dlg);
+        auto* rightOuter = new QVBoxLayout(rightCol);
+        auto* rightForm = new QFormLayout();
 
         auto* codigoEdit = new QLineEdit(&dlg);
         codigoEdit->setPlaceholderText(tr("C\u00f3digo opcional"));
         codigoEdit->setText(card.pieza.codigo);
-        form->addRow(tr("C\u00f3digo:"), codigoEdit);
+        rightForm->addRow(tr("C\u00f3digo:"), codigoEdit);
 
         auto* nombreEdit = new QLineEdit(&dlg);
         nombreEdit->setPlaceholderText(tr("Nombre de la pieza"));
         nombreEdit->setText(card.pieza.nombre);
-        form->addRow(tr("Nombre:"), nombreEdit);
+        rightForm->addRow(tr("Nombre:"), nombreEdit);
 
         auto* notasEdit = new QLineEdit(&dlg);
         notasEdit->setPlaceholderText(tr("Notas opcionales"));
         notasEdit->setText(card.pieza.notas);
-        form->addRow(tr("Notas:"), notasEdit);
+        rightForm->addRow(tr("Notas:"), notasEdit);
 
         auto* fechaCheck = new QCheckBox(tr("Usar fecha"), &dlg);
         fechaCheck->setChecked(card.pieza.fecha.isValid());
@@ -901,7 +1261,7 @@ void PiezasPage::onDuplicate(int piezaId)
         auto* fechaRow = new QHBoxLayout();
         fechaRow->addWidget(fechaCheck);
         fechaRow->addWidget(fechaEdit);
-        form->addRow(tr("Fecha:"), fechaRow);
+        rightForm->addRow(tr("Fecha:"), fechaRow);
 
         QObject::connect(fechaCheck, &QCheckBox::toggled, &dlg, [fechaEdit](bool on) {
             fechaEdit->setEnabled(on);
@@ -911,14 +1271,14 @@ void PiezasPage::onDuplicate(int piezaId)
         precioSpin->setRange(0, 999999.99);
         precioSpin->setDecimals(2);
         precioSpin->setValue(card.pieza.precio);
-        form->addRow(tr("Precio:"), precioSpin);
+        rightForm->addRow(tr("Precio:"), precioSpin);
 
         auto* propCombo = new QComboBox(&dlg);
         for (const auto& p : m_lastPropietarios)
             propCombo->addItem(p.nombre, p.id);
         int propIdx = propCombo->findData(card.pieza.propietarioId);
         if (propIdx >= 0) propCombo->setCurrentIndex(propIdx);
-        form->addRow(tr("Propietario:"), propCombo);
+        rightForm->addRow(tr("Propietario:"), propCombo);
 
         auto* ubiCombo = new QComboBox(&dlg);
         ubiCombo->addItem(tr("Sin ubicaci\u00f3n"), 0);
@@ -926,29 +1286,13 @@ void PiezasPage::onDuplicate(int piezaId)
             ubiCombo->addItem(u.nombre, u.id);
         int ubiIdx = ubiCombo->findData(card.pieza.ubicacionId);
         if (ubiIdx >= 0) ubiCombo->setCurrentIndex(ubiIdx);
-        form->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
+        rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
-        auto* tiposGroup = new QGroupBox(tr("Tipos"), &dlg);
-        auto* tiposLayout = new QVBoxLayout(tiposGroup);
-        QListWidget* tiposList = new QListWidget(&dlg);
-        tiposList->setMinimumHeight(160);
-        tiposList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        tiposList->setStyleSheet(QStringLiteral(
-            "QListWidget::indicator { width: 18px; height: 18px; border: 1px solid #bdc3c7; border-radius: 3px; background-color: #ffffff; }"
-            "QListWidget::indicator:checked { background-color: #27ae60; border-color: #1e8449; image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cGF0aCBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBkPSJNMyA5bDQgNCA4LTEyIi8+PC9zdmc+); }"));
-        for (const auto& t : m_lastTipos) {
-            auto* item = new QListWidgetItem(t.nombre.isEmpty() ? QString::number(t.id) : t.nombre);
-            item->setData(Qt::UserRole, t.id);
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-            item->setCheckState(card.tipoIds.contains(t.id) ? Qt::Checked : Qt::Unchecked);
-            tiposList->addItem(item);
-        }
-        tiposLayout->addWidget(tiposList);
-        form->addRow(tiposGroup);
+        rightOuter->addLayout(rightForm);
 
         auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
         auto* imgsLayout = new QVBoxLayout(imgsGroup);
-        QListWidget* imgsList = new QListWidget(&dlg);
+        auto* imgsList = new QListWidget(&dlg);
         imgsList->setMinimumHeight(120);
         imgsList->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         imgsList->setDragDropMode(QAbstractItemView::InternalMove);
@@ -966,7 +1310,10 @@ void PiezasPage::onDuplicate(int piezaId)
         imgsBtnRow->addWidget(removeImgBtn);
         imgsBtnRow->addStretch(1);
         imgsLayout->addLayout(imgsBtnRow);
-        form->addRow(imgsGroup);
+        rightOuter->addWidget(imgsGroup, 1);
+
+        hRow->addWidget(rightCol, 1);
+        mainLay->addLayout(hRow, 1);
 
         connect(addImgBtn, &QPushButton::clicked, &dlg, [&dlg, imgsList]() {
             QString path = QFileDialog::getOpenFileName(&dlg, tr("Seleccionar imagen"), QString(),
@@ -990,7 +1337,7 @@ void PiezasPage::onDuplicate(int piezaId)
         });
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-        form->addRow(buttons);
+        mainLay->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, [nombreEdit, &dlg]() {
             if (nombreEdit->text().trimmed().isEmpty()) {
                 QMessageBox::warning(&dlg, tr("Piezas"), tr("El nombre no puede estar vac\u00edo."));
@@ -1008,11 +1355,11 @@ void PiezasPage::onDuplicate(int piezaId)
         QString nombre = nombreEdit->text().trimmed();
         int propietarioId = propCombo->currentData().toInt();
         int ubicacionId = ubiCombo->currentData().toInt();
-        QVector<int> tipoIds;
-        for (int i = 0; i < tiposList->count(); ++i) {
-            if (tiposList->item(i)->checkState() == Qt::Checked)
-                tipoIds.append(tiposList->item(i)->data(Qt::UserRole).toInt());
-        }
+        QVector<int> tipoIds = checkedTipoIdsFromList(tiposList);
+        QJsonObject g = gatherPiezaParamValues(paramWidgets);
+        for (auto it = g.begin(); it != g.end(); ++it)
+            workingParams.insert(it.key(), it.value());
+        pruneWorkingToChecked(&workingParams, tipoIds);
         m_overlay->showOverlay();
         m_piezaService->create(
             codigoEdit->text().trimmed(),
@@ -1023,7 +1370,9 @@ void PiezasPage::onDuplicate(int piezaId)
             propietarioId,
             ubicacionId,
             tipoIds,
-            imagenesBase64);
+            imagenesBase64,
+            piezaParamsToJsonString(workingParams));
+        });
     }, Qt::SingleShotConnection);
     m_piezaService->fetchPiezaForEdit(piezaId);
 }

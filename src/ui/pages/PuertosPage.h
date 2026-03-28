@@ -3,6 +3,7 @@
 #include <QWidget>
 
 class SupabaseClient;
+class HistorialService;
 class PuertoService;
 class TipoService;
 class LoadingOverlay;
@@ -16,7 +17,8 @@ class PuertosPage : public QWidget
     Q_OBJECT
 public:
     /** Si viewOnly es true, solo se lista; sin añadir/editar/eliminar (permiso user). */
-    explicit PuertosPage(SupabaseClient* supabase, bool viewOnly, QWidget* parent = nullptr);
+    explicit PuertosPage(SupabaseClient* supabase, HistorialService* historial, bool viewOnly,
+                         QWidget* parent = nullptr);
 
 private slots:
     void refreshTable();

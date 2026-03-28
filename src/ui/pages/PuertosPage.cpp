@@ -27,12 +27,13 @@
 static const QStringList VAR_TIPOS = { QStringLiteral("entero"), QStringLiteral("texto"), QStringLiteral("decimal"), QStringLiteral("booleano") };
 static constexpr int kNombreTipoColumnWidth = 200;
 
-PuertosPage::PuertosPage(SupabaseClient* supabase, bool viewOnly, QWidget* parent)
+PuertosPage::PuertosPage(SupabaseClient* supabase, HistorialService* historial, bool viewOnly,
+                         QWidget* parent)
     : QWidget(parent)
     , m_viewOnly(viewOnly)
     , m_supabase(supabase)
-    , m_service(new PuertoService(supabase, this))
-    , m_tipoService(new TipoService(supabase, this))
+    , m_service(new PuertoService(supabase, historial, this))
+    , m_tipoService(new TipoService(supabase, historial, this))
 {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(24, 24, 24, 24);
@@ -115,8 +116,9 @@ PuertosPage::PuertosPage(SupabaseClient* supabase, bool viewOnly, QWidget* paren
     m_table->setStyleSheet(QStringLiteral(
         "QTableWidget { gridline-color: #e8e8e8; outline: none; }"
         "QTableWidget::item { padding: 12px 16px; color: #1a1a1a; border: none; outline: none; }"
-        "QTableWidget::item:hover { background-color: #e8eef4; border: none; outline: none; }"
-        "QTableWidget::item:selected { background-color: #dce8f2; color: #1a1a1a; border: none; outline: none; }"
+        "QTableWidget::item:hover { background-color: #f0f0f0; border: none; outline: none; }"
+        "QTableWidget::item:selected { background-color: #e4e4e4; color: #1a1a1a; border: none; outline: none; }"
+        "QTableWidget::item:selected:active { background-color: #dcdcdc; border: none; outline: none; }"
         "QTableWidget::item:focus { border: none; outline: none; }"
         "QHeaderView::section { padding: 12px 16px; background-color: #ecf0f1; color: #2c3e50; }"));
     m_table->setFocusPolicy(Qt::NoFocus);

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QString>
 #include <QDate>
+#include <QString>
 
 struct Pieza
 {
@@ -13,4 +13,6 @@ struct Pieza
     int propietarioId = 0;
     int ubicacionId = 0;
     QDate fecha;
+    /// JSON compacto: por cada id de tipo (clave string), objeto con nombreVariable -> valor
+    QString paramsJson;
 };

@@ -5,6 +5,7 @@
 #include "../models/Usuario.h"
 
 class SupabaseClient;
+class HistorialService;
 class QStackedWidget;
 class QPushButton;
 class QButtonGroup;
@@ -31,6 +32,7 @@ private:
 
     Usuario m_user;
     SupabaseClient* m_supabase;
+    HistorialService* m_historial;
     QStackedWidget* m_stack;
     QButtonGroup* m_navGroup;
     QVector<QPushButton*> m_navButtons;

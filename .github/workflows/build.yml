@@ -1,0 +1,78 @@
+# GitHub Flow: CI en PR y push a main/master; artefactos por SO.
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            qt_arch: win64_msvc2022_64
+            cmake_configure: '-G "Visual Studio 17 2022" -A x64'
+            build_args: --config Release
+            exe_dir: build/Release
+          - os: macos-latest
+            qt_arch: clang_64
+            cmake_configure: -DCMAKE_BUILD_TYPE=Release
+            build_args: ""
+            exe_dir: build
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+          dir: ${{ github.workspace }}/qt6
+
+      - name: Configure CMake
+        env:
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/qt6/${{ env.QT_VERSION }}/${{ matrix.qt_arch }}
+        run: cmake -B build -S . ${{ matrix.cmake_configure }} -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"
+
+      - name: Build
+        run: cmake --build build --parallel ${{ matrix.build_args }}
+
+      - name: windeployqt
+        if: runner.os == 'Windows'
+        run: |
+          cd "${{ matrix.exe_dir }}"
+          windeployqt.exe Editor.exe --compiler-runtime
+
+      - name: macdeployqt
+        if: runner.os == 'macOS'
+        run: macdeployqt "${{ matrix.exe_dir }}/Editor.app"
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Editor-Windows
+          path: ${{ matrix.exe_dir }}
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Editor-macOS
+          path: ${{ matrix.exe_dir }}/Editor.app

@@ -13,7 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 qt_standard_project_setup()
 
-add_executable(Editor WIN32
+add_executable(Editor
     src/main.cpp
     src/MainWindow.cpp
     src/core/SupabaseClient.cpp
@@ -24,6 +24,7 @@ add_executable(Editor WIN32
     src/core/PuertoService.cpp
     src/core/UsadaService.cpp
     src/core/PiezaService.cpp
+    src/core/HistorialService.cpp
     src/ui/LoadingOverlay.cpp
     src/ui/LoginWidget.cpp
     src/ui/RegisterWidget.cpp
@@ -35,13 +36,18 @@ add_executable(Editor WIN32
     src/ui/pages/PuertosPage.cpp
     src/ui/pages/DispositivosPage.cpp
     src/ui/pages/TiposPage.cpp
+    src/ui/pages/HistorialPage.cpp
 )
+if(WIN32)
+  set_target_properties(Editor PROPERTIES WIN32_EXECUTABLE TRUE)
+  target_sources(Editor PRIVATE ${CMAKE_SOURCE_DIR}/app.rc)
+endif()
+if(APPLE)
+  set_target_properties(Editor PROPERTIES MACOSX_BUNDLE TRUE)
+endif()
 qt_add_resources(Editor "resources" PREFIX "/"
   FILES resources.qrc
 )
-if(WIN32)
-  target_sources(Editor PRIVATE ${CMAKE_SOURCE_DIR}/app.rc)
-endif()
 target_include_directories(Editor PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 target_link_libraries(Editor PRIVATE Qt6::Widgets Qt6::Network)

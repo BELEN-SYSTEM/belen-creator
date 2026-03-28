@@ -4,10 +4,12 @@
 #include "models/Propietario.h"
 #include "models/Ubicacion.h"
 #include "models/Tipo.h"
-#include <QWidget>
+#include <functional>
 #include <QVector>
+#include <QWidget>
 
 class SupabaseClient;
+class HistorialService;
 class PiezaService;
 class PropietarioService;
 class UbicacionService;
@@ -24,7 +26,8 @@ class PiezasPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit PiezasPage(SupabaseClient* supabase, QWidget* parent = nullptr);
+    explicit PiezasPage(SupabaseClient* supabase, HistorialService* historial,
+                        QWidget* parent = nullptr);
 
 private slots:
     void refreshCards();
@@ -45,6 +48,7 @@ private:
     void updateSelectionStyle();
     void showHoverPopup(const PiezaCardData& data, const QPoint& globalPos);
     void hideHoverPopup();
+    void withTiposRefreshed(std::function<void()> body);
 
     SupabaseClient* m_supabase;
     PiezaService* m_piezaService;

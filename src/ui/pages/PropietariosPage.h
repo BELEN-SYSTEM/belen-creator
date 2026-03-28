@@ -3,6 +3,7 @@
 #include <QWidget>
 
 class SupabaseClient;
+class HistorialService;
 class PropietarioService;
 class LoadingOverlay;
 class QTableWidget;
@@ -13,7 +14,8 @@ class PropietariosPage : public QWidget
 {
     Q_OBJECT
 public:
-    explicit PropietariosPage(SupabaseClient* supabase, QWidget* parent = nullptr);
+    explicit PropietariosPage(SupabaseClient* supabase, HistorialService* historial,
+                              QWidget* parent = nullptr);
 
 private slots:
     void refreshTable();

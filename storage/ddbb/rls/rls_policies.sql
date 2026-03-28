@@ -70,7 +70,7 @@ CREATE POLICY "puerto_delete" ON public.puerto
 -- ---------------------------------------------------------------------------
 -- Resto de tablas: CRUD completo para admin y user (todas las filas)
 -- usuario, propietario, ubicacion, pieza, pieza_tipo, galeria,
--- timeline, bluetooth, usada
+-- timeline, bluetooth, usada, historial
 -- ---------------------------------------------------------------------------
 
 -- usuario
@@ -277,5 +277,28 @@ CREATE POLICY "usada_update" ON public.usada
   WITH CHECK (public.is_admin() OR public.is_app_user());
 
 CREATE POLICY "usada_delete" ON public.usada
+  FOR DELETE TO authenticated
+  USING (public.is_admin() OR public.is_app_user());
+
+-- historial (admin y user: CRUD completo)
+DROP POLICY IF EXISTS "historial_select" ON public.historial;
+DROP POLICY IF EXISTS "historial_insert" ON public.historial;
+DROP POLICY IF EXISTS "historial_update" ON public.historial;
+DROP POLICY IF EXISTS "historial_delete" ON public.historial;
+
+CREATE POLICY "historial_select" ON public.historial
+  FOR SELECT TO authenticated
+  USING (public.is_admin() OR public.is_app_user());
+
+CREATE POLICY "historial_insert" ON public.historial
+  FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR public.is_app_user());
+
+CREATE POLICY "historial_update" ON public.historial
+  FOR UPDATE TO authenticated
+  USING (public.is_admin() OR public.is_app_user())
+  WITH CHECK (public.is_admin() OR public.is_app_user());
+
+CREATE POLICY "historial_delete" ON public.historial
   FOR DELETE TO authenticated
   USING (public.is_admin() OR public.is_app_user());

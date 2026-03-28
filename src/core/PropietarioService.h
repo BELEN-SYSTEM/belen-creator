@@ -5,13 +5,15 @@
 #include <QVector>
 
 class SupabaseClient;
+class HistorialService;
 
 class PropietarioService : public QObject
 {
     Q_OBJECT
 
 public:
-    explicit PropietarioService(SupabaseClient* client, QObject* parent = nullptr);
+    explicit PropietarioService(SupabaseClient* client, HistorialService* historial = nullptr,
+                                QObject* parent = nullptr);
 
     void fetchAll();
     void create(const QString& nombre);
@@ -25,4 +27,5 @@ signals:
 
 private:
     SupabaseClient* m_client;
+    HistorialService* m_historial;
 };

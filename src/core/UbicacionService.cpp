@@ -1,11 +1,14 @@
 #include "UbicacionService.h"
 #include "SupabaseClient.h"
+#include "HistorialService.h"
 #include <QNetworkReply>
 #include <QJsonObject>
 #include <QJsonArray>
 
-UbicacionService::UbicacionService(SupabaseClient* client, QObject* parent)
-    : QObject(parent), m_client(client)
+UbicacionService::UbicacionService(SupabaseClient* client, HistorialService* historial, QObject* parent)
+    : QObject(parent)
+    , m_client(client)
+    , m_historial(historial)
 {
 }
 
@@ -35,41 +38,77 @@ void UbicacionService::create(const QString& nombre)
     QJsonObject body;
     body[QStringLiteral("nombre")] = nombre;
     QNetworkReply* reply = m_client->post(QStringLiteral("ubicacion"), body);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nombre]() {
         reply->deleteLater();
         bool ok = false;
-        SupabaseClient::parseArrayReply(reply, ok);
+        QJsonArray arr = SupabaseClient::parseArrayReply(reply, ok);
         if (!ok) { emit errorOccurred(SupabaseClient::errorString(reply)); return; }
+        if (m_historial && !arr.isEmpty()) {
+            m_historial->registrar(QStringLiteral("ubicacion"), QJsonValue(),
+                                   QJsonValue(arr.first().toObject()));
+        }
         emit mutationDone();
     });
 }
 
 void UbicacionService::update(int id, const QString& nombre)
 {
-    QJsonObject body;
-    body[QStringLiteral("nombre")] = nombre;
-    QNetworkReply* reply = m_client->patch(
+    QNetworkReply* getReply = m_client->get(
         QStringLiteral("ubicacion"),
-        QStringLiteral("id=eq.%1").arg(id), body);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        bool ok = false;
-        SupabaseClient::parseArrayReply(reply, ok);
-        if (!ok) { emit errorOccurred(SupabaseClient::errorString(reply)); return; }
-        emit mutationDone();
+        QStringLiteral("select=id,nombre&id=eq.%1").arg(id));
+    connect(getReply, &QNetworkReply::finished, this, [this, getReply, id, nombre]() {
+        getReply->deleteLater();
+        bool getOk = false;
+        QJsonArray prevArr = SupabaseClient::parseArrayReply(getReply, getOk);
+        QJsonObject antes = (getOk && !prevArr.isEmpty()) ? prevArr.first().toObject() : QJsonObject{};
+
+        QJsonObject body;
+        body[QStringLiteral("nombre")] = nombre;
+        QNetworkReply* reply = m_client->patch(
+            QStringLiteral("ubicacion"),
+            QStringLiteral("id=eq.%1").arg(id), body);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, nombre, antes]() {
+            reply->deleteLater();
+            bool ok = false;
+            QJsonArray arr = SupabaseClient::parseArrayReply(reply, ok);
+            if (!ok) { emit errorOccurred(SupabaseClient::errorString(reply)); return; }
+            if (m_historial) {
+                QJsonObject despues = !arr.isEmpty() ? arr.first().toObject() : antes;
+                despues[QStringLiteral("nombre")] = nombre;
+                m_historial->registrar(QStringLiteral("ubicacion"),
+                                       antes.isEmpty() ? QJsonValue() : QJsonValue(antes),
+                                       QJsonValue(despues));
+            }
+            emit mutationDone();
+        });
     });
 }
 
 void UbicacionService::remove(int id)
 {
-    QNetworkReply* reply = m_client->del(
-        QStringLiteral("ubicacion"), QStringLiteral("id=eq.%1").arg(id));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            emit errorOccurred(SupabaseClient::errorString(reply));
-            return;
-        }
-        emit mutationDone();
+    QNetworkReply* getReply = m_client->get(
+        QStringLiteral("ubicacion"),
+        QStringLiteral("select=id,nombre&id=eq.%1").arg(id));
+    connect(getReply, &QNetworkReply::finished, this, [this, getReply, id]() {
+        getReply->deleteLater();
+        bool getOk = false;
+        QJsonArray prevArr = SupabaseClient::parseArrayReply(getReply, getOk);
+        QJsonObject antes = (getOk && !prevArr.isEmpty()) ? prevArr.first().toObject() : QJsonObject{};
+
+        QNetworkReply* reply = m_client->del(
+            QStringLiteral("ubicacion"), QStringLiteral("id=eq.%1").arg(id));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, antes, id]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                emit errorOccurred(SupabaseClient::errorString(reply));
+                return;
+            }
+            if (m_historial) {
+                m_historial->registrar(QStringLiteral("ubicacion"),
+                                       antes.isEmpty() ? QJsonValue() : QJsonValue(antes),
+                                       QJsonValue());
+            }
+            emit mutationDone();
+        });
     });
 }

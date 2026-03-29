@@ -63,6 +63,13 @@ jobs:
         if: runner.os == 'macOS'
         run: macdeployqt "${{ matrix.exe_dir }}/Editor.app"
 
+      # upload-artifact no incluye el nombre del directorio padre: subir Editor.app dejaba solo Contents/ en el ZIP.
+      - name: Archive Editor.app for download
+        if: runner.os == 'macOS'
+        run: |
+          cd "${{ matrix.exe_dir }}"
+          ditto -c -k --keepParent Editor.app "${{ github.workspace }}/Editor-macOS.zip"
+
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -75,4 +82,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Editor-macOS
-          path: ${{ matrix.exe_dir }}/Editor.app
+          path: Editor-macOS.zip

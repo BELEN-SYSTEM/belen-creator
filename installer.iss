@@ -29,7 +29,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\Editor.exe"; DestDir: "{app}"; DestName: "BelenCreator.exe"; Flags: ignoreversion
+Source: "dist\BelenCreator.exe"; DestDir: "{app}"; DestName: "BelenCreator.exe"; Flags: ignoreversion
 Source: "dist\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs
 Source: "dist\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs

@@ -66,29 +66,29 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cd "${{ matrix.exe_dir }}"
-          windeployqt.exe Editor.exe --compiler-runtime
+          windeployqt.exe BelenCreator.exe --compiler-runtime
 
       - name: macdeployqt
         if: runner.os == 'macOS'
-        run: macdeployqt "${{ matrix.exe_dir }}/Editor.app"
+        run: macdeployqt "${{ matrix.exe_dir }}/BelenCreator.app"
 
-      # upload-artifact no incluye el nombre del directorio padre: subir Editor.app dejaba solo Contents/ en el ZIP.
-      - name: Archive Editor.app for download
+      # upload-artifact no incluye el nombre del directorio padre: subir .app dejaba solo Contents/ en el ZIP.
+      - name: Archive BelenCreator.app for download
         if: runner.os == 'macOS'
         run: |
           cd "${{ matrix.exe_dir }}"
-          ditto -c -k --keepParent Editor.app "${{ github.workspace }}/Editor-macOS.zip"
+          ditto -c -k --keepParent BelenCreator.app "${{ github.workspace }}/BelenCreator-macOS.zip"
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: Editor-Windows
+          name: BelenCreator-Windows
           path: ${{ matrix.exe_dir }}
 
       - name: Upload artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: Editor-macOS
-          path: Editor-macOS.zip
+          name: BelenCreator-macOS
+          path: BelenCreator-macOS.zip

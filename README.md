@@ -23,7 +23,7 @@ La seguridad de los datos no depende del cliente: las políticas **RLS** en la b
 | Build      | **CMake** + **Ninja**                |
 | Plataforma | Orientado a **Windows** (MSYS2 UCRT64) |
 
-El ejecutable del proyecto se genera como `Editor`; el instalador puede publicarlo como *Belen Creator* (ver `installer.iss` y `scripts/prepare_installer.bat`).
+El ejecutable se genera como `BelenCreator.exe` (Windows) o `BelenCreator.app` (macOS); el nombre visible de la app es **Belen Creator** (ver `installer.iss` y `scripts/prepare_installer.bat`).
 
 ## Arranque rápido (desarrollo)
 

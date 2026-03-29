@@ -28,14 +28,14 @@ if "%WINDEPLOYQT%"=="" (
     echo ERROR: windeployqt no encontrado. Instala: pacman -S mingw-w64-ucrt-x86_64-qt6-tools
     exit /b 1
 )
-"%WINDEPLOYQT%" --release --no-translations --dir %BUILD_DIR% %BUILD_DIR%\Editor.exe
+"%WINDEPLOYQT%" --release --no-translations --dir %BUILD_DIR% %BUILD_DIR%\BelenCreator.exe
 if errorlevel 1 (
     echo ADVERTENCIA: windeployqt fallo.
     exit /b 1
 )
 
-REM windeployqt no copia todas las DLLs del prefijo MSYS2; sin ellas Editor.exe falla al arrancar desde build/
-echo [2b/4] Copiando DLLs de runtime MSYS2 junto a Editor.exe en %BUILD_DIR%...
+REM windeployqt no copia todas las DLLs del prefijo MSYS2; sin ellas BelenCreator.exe falla al arrancar desde build/
+echo [2b/4] Copiando DLLs de runtime MSYS2 junto a BelenCreator.exe en %BUILD_DIR%...
 for %%d in (libgcc_s_seh-1 libstdc++-6 zlib1 libbrotlidec libbrotlienc libbrotlicommon libzstd libb2-1 libbz2-1 libharfbuzz-0 libfreetype-6 libmd4c libpng16-16 libwinpthread-1 libglib-2.0-0 libgraphite2 libintl-8 libiconv-2 libdouble-conversion) do (
     if exist "%QT_PREFIX%\bin\%%d.dll" copy /y "%QT_PREFIX%\bin\%%d.dll" %BUILD_DIR%\
 )
@@ -47,7 +47,7 @@ for %%f in ("%QT_PREFIX%\bin\libpcre2*.dll") do copy /y "%%f" %BUILD_DIR%\
 echo [3/4] Creando carpeta dist...
 if exist %DIST_DIR% rmdir /s /q %DIST_DIR%
 mkdir %DIST_DIR%
-copy /y %BUILD_DIR%\Editor.exe %DIST_DIR%\
+copy /y %BUILD_DIR%\BelenCreator.exe %DIST_DIR%\
 copy /y %BUILD_DIR%\*.dll %DIST_DIR%\ 2>nul
 for /d %%d in (platforms styles imageformats) do (
     if exist %BUILD_DIR%\%%d xcopy /e /i /y %BUILD_DIR%\%%d %DIST_DIR%\%%d

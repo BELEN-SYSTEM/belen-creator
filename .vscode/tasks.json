@@ -19,9 +19,9 @@
       "problemMatcher": []
     },
     {
-      "label": "Run Editor",
+      "label": "Run Belen Creator",
       "type": "shell",
-      "command": "${workspaceFolder}/build/Editor.exe",
+      "command": "${workspaceFolder}/build/BelenCreator.exe",
       "options": {
         "cwd": "${workspaceFolder}/build",
         "env": {

@@ -37,11 +37,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Python de Homebrew en el runner es PEP 668 (no pip --user al sistema). setup-python evita el error.
+      - name: Setup Python (macOS icon script)
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Generate macOS app icon (.icns)
         if: runner.os == 'macOS'
         run: |
-          python3 -m pip install --user --quiet Pillow
-          python3 scripts/generate_macos_icns.py
+          python -m pip install --quiet Pillow
+          python scripts/generate_macos_icns.py
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4

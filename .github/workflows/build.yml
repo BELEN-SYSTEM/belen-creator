@@ -45,10 +45,19 @@ jobs:
           cache: true
           dir: ${{ github.workspace }}/qt6
 
+      # En macOS el runner suele ser arm64; sin esto el .app solo sirve para Apple Silicon (en Intel: "no compatible").
       - name: Configure CMake
         env:
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/qt6/${{ env.QT_VERSION }}/${{ matrix.qt_arch }}
-        run: cmake -B build -S . ${{ matrix.cmake_configure }} -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cmake -B build -S . ${{ matrix.cmake_configure }} \
+              -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+              -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          else
+            cmake -B build -S . ${{ matrix.cmake_configure }} -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"
+          fi
 
       - name: Build
         run: cmake --build build --parallel ${{ matrix.build_args }}

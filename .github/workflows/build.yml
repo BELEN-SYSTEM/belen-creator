@@ -37,6 +37,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate macOS app icon (.icns)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -m pip install --user --quiet Pillow
+          python3 scripts/generate_macos_icns.py
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:

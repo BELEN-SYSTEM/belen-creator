@@ -51,6 +51,14 @@ if(APPLE)
     MACOSX_BUNDLE_LONG_VERSION_STRING "1.1.0"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "1.1"
   )
+  set(_belen_mac_icon "${CMAKE_SOURCE_DIR}/icons/AppIcon.icns")
+  if(EXISTS "${_belen_mac_icon}")
+    set_target_properties(BelenCreator PROPERTIES MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
+    set_source_files_properties("${_belen_mac_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(BelenCreator PRIVATE "${_belen_mac_icon}")
+  else()
+    message(WARNING "macOS: falta icons/AppIcon.icns (icono del .app). Ejecuta: python3 scripts/generate_macos_icns.py")
+  endif()
 endif()
 qt_add_resources(BelenCreator "resources" PREFIX "/"
   FILES resources.qrc

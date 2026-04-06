@@ -47,6 +47,8 @@
 #include <QHash>
 #include <QMap>
 #include <QSet>
+#include <QLocale>
+#include <QVariant>
 #include <memory>
 
 namespace {
@@ -234,6 +236,21 @@ static QJsonObject workingParamsFromPieza(const Pieza& p)
 static QString piezaParamsToJsonString(const QJsonObject& o)
 {
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+static QString formatDimCm(bool has, double v)
+{
+    if (!has)
+        return QStringLiteral("\u2014");
+    return QLocale().toString(v, 'f', 2);
+}
+
+static QString dimMedidasCheckStyleSheet()
+{
+    return QStringLiteral(
+        "QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #bdc3c7; border-radius: 3px; "
+        "background-color: #ffffff; }"
+        "QCheckBox::indicator:checked { background-color: #1abc9c; border-color: #148f77; }");
 }
 
 } // namespace
@@ -626,6 +643,13 @@ void PiezasPage::showHoverPopup(const PiezaCardData& data, const QPoint& globalP
     if (data.pieza.fecha.isValid())
         addLine(tr("Fecha"), data.pieza.fecha.toString(Qt::ISODate));
     addLine(tr("Precio"), QString::number(data.pieza.precio, 'f', 2));
+    if (data.pieza.hasLargoCm || data.pieza.hasAnchoCm || data.pieza.hasAltoCm) {
+        addLine(tr("Medidas (cm)"),
+            QStringLiteral("%1 \u00d7 %2 \u00d7 %3")
+                .arg(formatDimCm(data.pieza.hasLargoCm, data.pieza.largoCm),
+                     formatDimCm(data.pieza.hasAnchoCm, data.pieza.anchoCm),
+                     formatDimCm(data.pieza.hasAltoCm, data.pieza.altoCm)));
+    }
     addLine(tr("Propietario"), data.propietarioNombre);
     addLine(tr("Ubicaci\u00f3n"), data.ubicacionNombre);
     addLine(tr("Tipos"), data.tipos.join(QStringLiteral(", ")));
@@ -867,6 +891,35 @@ void PiezasPage::onAdd()
         ubiCombo->addItem(u.nombre, u.id);
     rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
+    auto* dimCheck = new QCheckBox(tr("Definir medidas (cm)"), &dlg);
+    dimCheck->setChecked(false);
+    dimCheck->setStyleSheet(dimMedidasCheckStyleSheet());
+    auto* dimLargoSpin = new QDoubleSpinBox(&dlg);
+    dimLargoSpin->setRange(0, 99999.99);
+    dimLargoSpin->setDecimals(2);
+    dimLargoSpin->setValue(0);
+    dimLargoSpin->setEnabled(false);
+    auto* dimAnchoSpin = new QDoubleSpinBox(&dlg);
+    dimAnchoSpin->setRange(0, 99999.99);
+    dimAnchoSpin->setDecimals(2);
+    dimAnchoSpin->setValue(0);
+    dimAnchoSpin->setEnabled(false);
+    auto* dimAltoSpin = new QDoubleSpinBox(&dlg);
+    dimAltoSpin->setRange(0, 99999.99);
+    dimAltoSpin->setDecimals(2);
+    dimAltoSpin->setValue(0);
+    dimAltoSpin->setEnabled(false);
+    QObject::connect(dimCheck, &QCheckBox::toggled, &dlg,
+        [dimLargoSpin, dimAnchoSpin, dimAltoSpin](bool on) {
+            dimLargoSpin->setEnabled(on);
+            dimAnchoSpin->setEnabled(on);
+            dimAltoSpin->setEnabled(on);
+        });
+    rightForm->addRow(dimCheck);
+    rightForm->addRow(tr("Largo (cm):"), dimLargoSpin);
+    rightForm->addRow(tr("Ancho (cm):"), dimAnchoSpin);
+    rightForm->addRow(tr("Alto (cm):"), dimAltoSpin);
+
     rightOuter->addLayout(rightForm);
 
     auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
@@ -934,6 +987,12 @@ void PiezasPage::onAdd()
     for (auto it = g.begin(); it != g.end(); ++it)
         workingParams.insert(it.key(), it.value());
     pruneWorkingToChecked(&workingParams, tipoIds);
+    QVariant vl, va, vh;
+    if (dimCheck->isChecked()) {
+        vl = dimLargoSpin->value();
+        va = dimAnchoSpin->value();
+        vh = dimAltoSpin->value();
+    }
     m_overlay->showOverlay();
     m_piezaService->create(
         codigoEdit->text().trimmed(),
@@ -943,6 +1002,7 @@ void PiezasPage::onAdd()
         precioSpin->value(),
         propietarioId,
         ubicacionId,
+        vl, va, vh,
         tipoIds,
         imagenesBase64,
         piezaParamsToJsonString(workingParams));
@@ -1078,6 +1138,35 @@ void PiezasPage::onEdit(int piezaId)
         if (ubiIdx >= 0) ubiCombo->setCurrentIndex(ubiIdx);
         rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
+        auto* dimCheck = new QCheckBox(tr("Definir medidas (cm)"), &dlg);
+        dimCheck->setChecked(card.pieza.hasLargoCm || card.pieza.hasAnchoCm || card.pieza.hasAltoCm);
+        dimCheck->setStyleSheet(dimMedidasCheckStyleSheet());
+        auto* dimLargoSpin = new QDoubleSpinBox(&dlg);
+        dimLargoSpin->setRange(0, 99999.99);
+        dimLargoSpin->setDecimals(2);
+        dimLargoSpin->setValue(card.pieza.hasLargoCm ? card.pieza.largoCm : 0);
+        dimLargoSpin->setEnabled(dimCheck->isChecked());
+        auto* dimAnchoSpin = new QDoubleSpinBox(&dlg);
+        dimAnchoSpin->setRange(0, 99999.99);
+        dimAnchoSpin->setDecimals(2);
+        dimAnchoSpin->setValue(card.pieza.hasAnchoCm ? card.pieza.anchoCm : 0);
+        dimAnchoSpin->setEnabled(dimCheck->isChecked());
+        auto* dimAltoSpin = new QDoubleSpinBox(&dlg);
+        dimAltoSpin->setRange(0, 99999.99);
+        dimAltoSpin->setDecimals(2);
+        dimAltoSpin->setValue(card.pieza.hasAltoCm ? card.pieza.altoCm : 0);
+        dimAltoSpin->setEnabled(dimCheck->isChecked());
+        QObject::connect(dimCheck, &QCheckBox::toggled, &dlg,
+            [dimLargoSpin, dimAnchoSpin, dimAltoSpin](bool on) {
+                dimLargoSpin->setEnabled(on);
+                dimAnchoSpin->setEnabled(on);
+                dimAltoSpin->setEnabled(on);
+            });
+        rightForm->addRow(dimCheck);
+        rightForm->addRow(tr("Largo (cm):"), dimLargoSpin);
+        rightForm->addRow(tr("Ancho (cm):"), dimAnchoSpin);
+        rightForm->addRow(tr("Alto (cm):"), dimAltoSpin);
+
         rightOuter->addLayout(rightForm);
 
         auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
@@ -1150,9 +1239,16 @@ void PiezasPage::onEdit(int piezaId)
         for (auto it = g.begin(); it != g.end(); ++it)
             workingParams.insert(it.key(), it.value());
         pruneWorkingToChecked(&workingParams, tipoIds);
+        QVariant vl, va, vh;
+        if (dimCheck->isChecked()) {
+            vl = dimLargoSpin->value();
+            va = dimAnchoSpin->value();
+            vh = dimAltoSpin->value();
+        }
         m_overlay->showOverlay();
         m_piezaService->update(piezaId, codigoEdit->text().trimmed(), nombre, notasEdit->text().trimmed(),
             fechaCheck->isChecked() ? fechaEdit->date() : QDate(), precioSpin->value(), propietarioId, ubicacionId,
+            vl, va, vh,
             tipoIds, imagenesBase64, piezaParamsToJsonString(workingParams));
         });
     }, Qt::SingleShotConnection);
@@ -1288,6 +1384,35 @@ void PiezasPage::onDuplicate(int piezaId)
         if (ubiIdx >= 0) ubiCombo->setCurrentIndex(ubiIdx);
         rightForm->addRow(tr("Ubicaci\u00f3n:"), ubiCombo);
 
+        auto* dimCheck = new QCheckBox(tr("Definir medidas (cm)"), &dlg);
+        dimCheck->setChecked(card.pieza.hasLargoCm || card.pieza.hasAnchoCm || card.pieza.hasAltoCm);
+        dimCheck->setStyleSheet(dimMedidasCheckStyleSheet());
+        auto* dimLargoSpin = new QDoubleSpinBox(&dlg);
+        dimLargoSpin->setRange(0, 99999.99);
+        dimLargoSpin->setDecimals(2);
+        dimLargoSpin->setValue(card.pieza.hasLargoCm ? card.pieza.largoCm : 0);
+        dimLargoSpin->setEnabled(dimCheck->isChecked());
+        auto* dimAnchoSpin = new QDoubleSpinBox(&dlg);
+        dimAnchoSpin->setRange(0, 99999.99);
+        dimAnchoSpin->setDecimals(2);
+        dimAnchoSpin->setValue(card.pieza.hasAnchoCm ? card.pieza.anchoCm : 0);
+        dimAnchoSpin->setEnabled(dimCheck->isChecked());
+        auto* dimAltoSpin = new QDoubleSpinBox(&dlg);
+        dimAltoSpin->setRange(0, 99999.99);
+        dimAltoSpin->setDecimals(2);
+        dimAltoSpin->setValue(card.pieza.hasAltoCm ? card.pieza.altoCm : 0);
+        dimAltoSpin->setEnabled(dimCheck->isChecked());
+        QObject::connect(dimCheck, &QCheckBox::toggled, &dlg,
+            [dimLargoSpin, dimAnchoSpin, dimAltoSpin](bool on) {
+                dimLargoSpin->setEnabled(on);
+                dimAnchoSpin->setEnabled(on);
+                dimAltoSpin->setEnabled(on);
+            });
+        rightForm->addRow(dimCheck);
+        rightForm->addRow(tr("Largo (cm):"), dimLargoSpin);
+        rightForm->addRow(tr("Ancho (cm):"), dimAnchoSpin);
+        rightForm->addRow(tr("Alto (cm):"), dimAltoSpin);
+
         rightOuter->addLayout(rightForm);
 
         auto* imgsGroup = new QGroupBox(tr("Im\u00e1genes"), &dlg);
@@ -1360,6 +1485,12 @@ void PiezasPage::onDuplicate(int piezaId)
         for (auto it = g.begin(); it != g.end(); ++it)
             workingParams.insert(it.key(), it.value());
         pruneWorkingToChecked(&workingParams, tipoIds);
+        QVariant vl, va, vh;
+        if (dimCheck->isChecked()) {
+            vl = dimLargoSpin->value();
+            va = dimAnchoSpin->value();
+            vh = dimAltoSpin->value();
+        }
         m_overlay->showOverlay();
         m_piezaService->create(
             codigoEdit->text().trimmed(),
@@ -1369,6 +1500,7 @@ void PiezasPage::onDuplicate(int piezaId)
             precioSpin->value(),
             propietarioId,
             ubicacionId,
+            vl, va, vh,
             tipoIds,
             imagenesBase64,
             piezaParamsToJsonString(workingParams));

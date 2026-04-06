@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QEvent>
 #include "core/PiezaCardData.h"
 #include "models/Propietario.h"
 #include "models/Ubicacion.h"

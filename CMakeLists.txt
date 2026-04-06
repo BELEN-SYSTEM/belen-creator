@@ -20,12 +20,14 @@ add_executable(BelenCreator
     src/core/AuthService.cpp
     src/core/PropietarioService.cpp
     src/core/UbicacionService.cpp
+    src/core/TimelineService.cpp
     src/core/TipoService.cpp
     src/core/PuertoService.cpp
     src/core/UsadaService.cpp
     src/core/PiezaService.cpp
     src/core/HistorialService.cpp
     src/ui/LoadingOverlay.cpp
+    src/ui/TimelineTopBoardView.cpp
     src/ui/LoginWidget.cpp
     src/ui/RegisterWidget.cpp
     src/ui/DashboardWidget.cpp

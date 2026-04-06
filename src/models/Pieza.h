@@ -13,6 +13,13 @@ struct Pieza
     int propietarioId = 0;
     int ubicacionId = 0;
     QDate fecha;
-    /// JSON compacto: por cada id de tipo (clave string), objeto con nombreVariable -> valor
+    /// Medidas en centímetros; `has*` false = NULL en BD
+    bool hasLargoCm = false;
+    double largoCm = 0;
+    bool hasAnchoCm = false;
+    double anchoCm = 0;
+    bool hasAltoCm = false;
+    double altoCm = 0;
+    /// Agregado en cliente desde filas `pieza_tipo.params`: por cada tipo (clave string id), variables -> valor
     QString paramsJson;
 };

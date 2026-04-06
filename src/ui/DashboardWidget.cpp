@@ -11,6 +11,7 @@
 #include "core/HistorialService.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QLayoutItem>
 #include <QStackedWidget>
 #include <QPushButton>
 #include <QButtonGroup>
@@ -20,15 +21,15 @@ static const char* sidebarStyle = R"(
     #sidebar { background-color: #2c3e50; }
     #sidebarTitle {
         font-size: 18px; font-weight: bold; color: white;
-        padding: 24px 24px 8px 24px;
+        padding: 24px 12px 8px 12px;
     }
     #userLabel {
         font-size: 12px; color: #bdc3c7;
-        padding: 8px 24px;
+        padding: 8px 12px;
     }
     #sidebar QPushButton {
         text-align: left;
-        padding: 12px 24px;
+        padding: 12px 12px;
         border: none;
         color: #ecf0f1;
         font-size: 13px;
@@ -58,13 +59,21 @@ DashboardWidget::DashboardWidget(const Usuario& user, SupabaseClient* supabase, 
 
     auto* sidebar = new QWidget(this);
     sidebar->setObjectName(QStringLiteral("sidebar"));
-    sidebar->setFixedWidth(220);
     sidebar->setStyleSheet(QString::fromUtf8(sidebarStyle));
 
     auto* sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
     sidebarLayout->setSpacing(0);
     setupSidebar(sidebarLayout);
+    sidebar->ensurePolished();
+    int sidebarW = 0;
+    for (int i = 0; i < sidebarLayout->count(); ++i) {
+        QLayoutItem* item = sidebarLayout->itemAt(i);
+        if (!item) continue;
+        if (QWidget* w = item->widget())
+            sidebarW = qMax(sidebarW, w->sizeHint().width());
+    }
+    sidebar->setFixedWidth(qMax(sidebarW, 1));
     mainLayout->addWidget(sidebar);
 
     auto* content = new QWidget(this);
@@ -134,7 +143,7 @@ QPushButton* DashboardWidget::addNavButton(QVBoxLayout* layout, const QString& t
 void DashboardWidget::setupPages()
 {
     m_stack->addWidget(new PiezasPage(m_supabase, m_historial, this));
-    m_stack->addWidget(new TimelinesPage(this));
+    m_stack->addWidget(new TimelinesPage(m_supabase, m_historial, this));
     m_stack->addWidget(new PropietariosPage(m_supabase, m_historial, this));
     m_stack->addWidget(new UbicacionesPage(m_supabase, m_historial, this));
     m_stack->addWidget(new DispositivosPage(this));
